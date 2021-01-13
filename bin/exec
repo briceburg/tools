@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC1090
+#
+# usage:  bin/exec <cmd> [...]
+# example: bin/exec go build .
+#
+#  bin/exec will run <cmd> inside a container executed as if the dependencies
+#  it provides are installed on the local ("host") system.
+#
+#  for instance, running `bin/exec go build .` can execute a container that
+#  provides the golang utilities and compile code in the current directory --
+#  even if go is not installed on the local system.
+#
+#  + bin/exec image is defined under ./pipeline/Dockerfile (or EXEC_DOCKER_PATH)
+#  + cmd is executed as the current user, using the current environment
+#    (minus any blacklisted variables)
+#  + the working directory is set to current [host] working directory.
+#
+# Copyright (C) 2020 Brice Burgess
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not, see http://www.gnu.org/licenses/.
+#
+# @license GPLv3
+# @source git@github.com:briceburg/tools.git
+# @source-path bin/exec
+# @source-url https://raw.githubusercontent.com/briceburg/tools/bin/exec
+# @revision git-ref HEAD
+# @version 0.1.0
+
+main(){
+  set -eo pipefail
+  local path="${BASH_SOURCE[0]}"
+  while [ -L "$path" ] ; do path="$(readlink "$path")" ; done
+
+  export PROJECT_ROOT
+  PROJECT_ROOT="$( cd "$(dirname "$path")/.." ; pwd -P)"
+  export EXEC_DOCKER_PATH="${EXEC_DOCKER_PATH:-$PROJECT_ROOT/pipeline/docker}"
+
+  docker:set_flags
+  image="$(docker:get_image_build)"
+
+  docker run --rm --log-driver=none --interactive=true "${docker_flags[@]}" \
+    --env-file=<( env "${var_blacklist[@]}" | cut -f1 -d= ) \
+    -e "__EXEC_IMAGE=$image" \
+    -e HOME="$HOME" \
+    --network=host \
+    -v "$HOME:$HOME" \
+    -v "$PROJECT_ROOT:$PROJECT_ROOT"\
+    -v "/var/run/docker.sock:/var/run/docker.sock"\
+    --workdir="$PWD" \
+    "$image" "$@"
+}
+
+docker:get_image_build()(
+  cd "$EXEC_DOCKER_PATH"
+  dockerfile="${DOCKERFILE:-Dockerfile}"
+
+  iid_cache=".iid-$($md5sum "$dockerfile" | awk '{print $1}')"
+  read -r -a build_flags <<< "${EXEC_BUILD_FLAGS:-}"
+
+  if [[ -e "$iid_cache" && "$(docker images -q "$(cat "$iid_cache")" 2> /dev/null)" != "" ]]; then
+    echo -e "[INFO] skipping image build. using $(cat "$iid_cache")" >&2
+    iidfile="$iid_cache"
+  else
+    log "building $EXEC_DOCKER_PATH/$dockerfile ..."
+    iidfile=$(mktemp)
+    trap '{ rm -f $iidfile; }' EXIT
+
+    # passthrough SSH_AUTH_SOCKET if available
+    [ -e "$SSH_AUTH_SOCK" ] && build_flags+=("--ssh" "default")
+
+    DOCKER_BUILDKIT=1 docker build "${build_flags[@]}" \
+      --iidfile="$iidfile" \
+      --file="$dockerfile" \
+      . >&2 || die "[ERR] building pipeline-exec container failed"
+
+    # cache this build
+    cp "$iidfile" "$iid_cache"
+  fi
+
+  cat "$iidfile"
+)
+
+docker:set_flags(){
+  docker_flags=("${DOCKER_FLAGS[@]}")
+  var_blacklist=(
+    -u HOME
+    -u HOSTNAME
+    -u JAVA_HOME
+    -u LC_CTYPE
+    -u LC_TYPE
+    -u LANG
+    -u LOGNAME
+    -u MAIL
+    -u OLDPWD
+    -u PATH
+    -u PWD
+    -u SHELL
+    -u SHLVL
+    -u TERM
+    -u TERM_SESSION_ID
+    -u TMPDIR
+    -u USER
+    -u _
+    #-u SSH_AUTH_SOCK
+  )
+
+  if [ -t 0 ] && [ -t 1 ]; then
+    docker_flags+=("--tty=true")
+  else
+    docker_flags+=("--tty=false")
+  fi
+
+  # passthrough SSH_AUTH_SOCKET if available
+  [ -e "$SSH_AUTH_SOCK" ] && docker_flags+=("-v" "$SSH_AUTH_SOCK:$SSH_AUTH_SOCK")
+
+
+  # make sure we can mount AWS_SHARED_CREDENTIALS_FILE if it's specified
+  [ -e "$AWS_SHARED_CREDENTIALS_FILE" ] && docker_flags+=("-v" "$AWS_SHARED_CREDENTIALS_FILE:$AWS_SHARED_CREDENTIALS_FILE")
+
+  # docker-4-mac runs as the 'current' user masqued as root in the linuxkit vm.
+  if [[ "$OSTYPE" =~ darwin|macos* ]]; then
+    docker_flags+=("-v" "$HOME:/root")
+  else
+    # run container as current user on *nixs outside of docker-for-mac VM
+    # shellcheck disable=SC2012
+    docker_flags+=(
+      -u "$(id -u):$(id -g)"
+      -v "/etc/passwd:/etc/passwd:ro"
+      --group-add "$(ls -ln /var/run/docker.sock | awk '{print $4}')"
+    )
+  fi
+
+  # add host.docker.internal on linux machines
+  # @TODO until docker-engine 20.04 is released and available on jenkins,
+  #       magical 'host-gateway' value. instead, we manually detect
+  #[[ "$OSTYPE" =~ darwin|macos* ]] || docker_flags+=("--add-host" "host.docker.internal:host-gateway")
+  [[ "$OSTYPE" =~ darwin|macos* ]] || docker_flags+=("--add-host" "host.docker.internal:$(ip route | grep docker0 | awk '{print $9}')")
+}
+
+[[ "$OSTYPE" =~ darwin|macos* ]] && md5sum='md5 -r' || md5sum="md5sum"
+readonly __entry=$(basename "$0")
+log(){ echo -e "$__entry: $*" >&2; }
+die(){ log "$*"; exit 1; }
+main "$@"
