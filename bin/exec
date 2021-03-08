@@ -28,9 +28,9 @@
 # @license GPLv3
 # @source git@github.com:briceburg/tools.git
 # @source-path bin/exec
-# @source-url https://raw.githubusercontent.com/briceburg/tools/bin/exec
+# @source-url https://raw.githubusercontent.com/briceburg/tools/main/bin/exec
 # @revision git-ref HEAD
-# @version 0.2.0
+# @version 0.2.1
 
 main(){
   set -eo pipefail
@@ -124,6 +124,6 @@ docker:set_flags(){
 
 [[ "$OSTYPE" =~ darwin|macos* ]] && md5sum='md5 -r' || md5sum="md5sum"
 readonly __entry=$(basename "$0")
-log(){ echo -e "$__entry: [${LOG_LEVEL:-INFO}] $*" >&2; }
+log(){ printf "%-12s [${LOG_LEVEL:-INFO}] $*\n" "# ($__entry)" >&2; }
 die(){ LOG_LEVEL=ERR log "$*"; exit 1; }
 main "$@"
