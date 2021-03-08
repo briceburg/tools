@@ -8,15 +8,15 @@
 #
 # @source git@github.com:briceburg/tools.git
 # @source-path bin/encrypt
-# @source-url https://raw.githubusercontent.com/briceburg/tools/bin/decrypt
+# @source-url https://raw.githubusercontent.com/briceburg/tools/main/bin/decrypt
 # @revision git-ref HEAD
-# @version 0.0.1
+# @version 0.0.2
 
 set -eo pipefail
 readonly PROJECT_ROOT="$( cd "$(dirname "$0")/.." ; pwd -P)"
 readonly __entry=$(basename "$0")
-log(){ echo -e "$__entry: $*" >&2; }
-die(){ log "[ERR] $*"; exit 1; }
+log(){ printf "# %-${__lpad:-17}s [${__ll:-INFO}] $*\n" "($__entry)" >&2; }
+die(){ __ll=ERR log "$*"; exit 1; }
 
 [ -n "$VAULT_PASSWORD_FILE" ] || die "VAULT_PASSWORD_FILE variable is not defined. this should be a path to a file containing the VAULT_PASSWORD_FILE password"
 [ -e "$VAULT_PASSWORD_FILE" ] || die "VAULT_PASSWORD_FILE ($VAULT_PASSWORD_FILE) must exist"
