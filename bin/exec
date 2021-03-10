@@ -16,7 +16,8 @@
 #
 #  Environment Variables:
 #  EXEC_BUILD_FLAGS: additional `docker build` flags. optional.
-#  EXEC_DOCKERFILE: The Dockerfile of the <cmd> image to build. Used if EXEC_IMAGE is empty.
+#  EXEC_DOCKERFILE: The Dockerfile of the <cmd> image to build. Used if EXEC_IMAGE is empty.\
+#  EXEC_DOCKER_FLAGS: Arbitrary flags to pass to docker run. Comma separated. E.g. "-v,/host path:/container path:ro,--log-driver=json"
 #  EXEC_ENABLE_CACHE: false to disable build cache, e.g. `EXEC_ENABLE_CACHE=false bin/exec ...`
 #  EXEC_IMAGE: The <cmd> image (e.g. 'gradle:6'). If empty, use EXEC_DOCKERFILE.
 #
@@ -30,7 +31,7 @@
 # @source-path bin/exec
 # @source-url https://raw.githubusercontent.com/briceburg/tools/main/bin/exec
 # @revision git-ref HEAD
-# @version 0.2.2
+# @version 0.2.3
 
 main(){
   set -eo pipefail
@@ -69,7 +70,7 @@ docker:get_image_build(){
 }
 
 docker:set_flags(){
-  docker_flags=("${DOCKER_FLAGS[@]}")
+  IFS="," read -r -a docker_flags <<< "$EXEC_DOCKER_FLAGS"
   var_blacklist=(
     -u HOME
     -u HOSTNAME
